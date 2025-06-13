@@ -1,4 +1,4 @@
-# IHubX24-Sim: Input Hub x24 digital input channels module for simulation.
+# ihubx24-sim: Input Hub x24 digital input channels module for simulation.
 
 Linux module that simulates 24 digital inputs with high (1) and low (0) states.
 
