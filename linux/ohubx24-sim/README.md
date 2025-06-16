@@ -17,14 +17,14 @@ This will compile `ohubx24-sim.c` and produce `ohubx24-sim.ko`.
 
 ## Loading the Module
 
-### Load with Default (1 device)
+### Load 1 device (default)
 
 ```
 make load
 ```
 Creates `/dev/ohubx24-sim0` and logs to `/tmp/ohubx24-output0`.
 
-### Load with Multiple Devices
+### Load multiple devices
 
 ```
 make load NUM_DEVICES=3
@@ -53,8 +53,6 @@ make clean
 This will remove compiled files and all `/tmp/ohubx24-output*` log files.
 
 ## Usage Examples
-
-### Basic Usage
 
 Load module with 3 devices:
 

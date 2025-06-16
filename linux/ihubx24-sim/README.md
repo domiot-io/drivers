@@ -19,7 +19,7 @@ This will compile `ihubx24-sim.c` and produce `ihubx24-sim.ko`.
 
 ## Loading the Module
 
-### Load with Default (1 device)
+### Load 1 device (default)
 
 ```
 make load
@@ -27,7 +27,7 @@ make load
 
 Creates `/dev/ihubx24-sim0`. At this point you can read from `/dev/ihubx24-sim0`.
 
-### Load with Multiple Devices
+### Load multiple devices
 
 ```
 make load NUM_DEVICES=3
