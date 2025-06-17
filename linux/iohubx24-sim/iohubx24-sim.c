@@ -9,6 +9,9 @@
 #include <linux/mutex.h>
 #include <linux/string.h>
 #include <linux/version.h>
+#include <linux/poll.h>
+#include <linux/sched.h>
+#include <linux/list.h>
 
 #define DEVICE_NAME "iohubx24-sim"
 #define CLASS_NAME "iohubx24"
@@ -37,13 +40,23 @@ MODULE_PARM_DESC(num_devices, "Number of iohubx24-sim devices to create (default
 #define dbg_info(level, fmt, ...) do { if (debug_level >= level) printk(KERN_INFO "iohubx24-sim: " fmt, ##__VA_ARGS__); } while(0)
 #define dbg_dev_info(level, dev_id, fmt, ...) do { if (debug_level >= level) printk(KERN_INFO "iohubx24-sim%d: " fmt, dev_id, ##__VA_ARGS__); } while(0)
 
+struct iohubx24_reader {
+    struct list_head list;
+    wait_queue_head_t wait;
+    int state_changed;
+    struct iohubx24_device *device;
+};
+
 struct iohubx24_device {
     dev_t dev_num;
     struct cdev cdev;
     struct device *device;
     int minor;
     char channel_states[NUM_CHANNELS];
+    char prev_channel_states[NUM_CHANNELS];
     struct mutex state_mutex;
+    struct list_head readers_list;
+    spinlock_t readers_lock;
 };
 
 static int major_number;
@@ -54,74 +67,109 @@ static int device_open(struct inode *, struct file *);
 static int device_release(struct inode *, struct file *);
 static ssize_t device_read(struct file *, char *, size_t, loff_t *);
 static ssize_t device_write(struct file *, const char *, size_t, loff_t *);
+static unsigned int device_poll(struct file *, struct poll_table_struct *);
 
 static struct file_operations fops = {
     .open = device_open,
     .read = device_read,
     .write = device_write,
     .release = device_release,
+    .poll = device_poll,
 };
 
 static int device_open(struct inode *inodep, struct file *filep)
 {
+    struct iohubx24_reader *reader;
     int minor = iminor(inodep);
+    
     if (minor >= num_devices) {
         dbg_err("Invalid minor number %d\n", minor);
         return -ENODEV;
     }
     
-    filep->private_data = &devices[minor];
+    reader = kmalloc(sizeof(struct iohubx24_reader), GFP_KERNEL);
+    if (!reader) {
+        return -ENOMEM;
+    }
+    
+    init_waitqueue_head(&reader->wait);
+    reader->state_changed = 1; // First read should always succeed
+    reader->device = &devices[minor];
+    
+    spin_lock(&devices[minor].readers_lock);
+    list_add(&reader->list, &devices[minor].readers_list);
+    spin_unlock(&devices[minor].readers_lock);
+    
+    filep->private_data = reader;
     dbg_dev_info(2, minor, "Device opened\n");
     return 0;
 }
 
 static int device_release(struct inode *inodep, struct file *filep)
 {
+    struct iohubx24_reader *reader = filep->private_data;
     int minor = iminor(inodep);
+    
+    if (reader && reader->device) {
+        spin_lock(&reader->device->readers_lock);
+        list_del(&reader->list);
+        spin_unlock(&reader->device->readers_lock);
+        kfree(reader);
+    }
+    
     dbg_dev_info(2, minor, "Device closed\n");
     return 0;
 }
 
 static ssize_t device_read(struct file *filep, char *buffer, size_t len, loff_t *offset)
 {
-    struct iohubx24_device *dev = (struct iohubx24_device *)filep->private_data;
+    struct iohubx24_reader *reader = filep->private_data;
     char message[BUFFER_SIZE];
     int errors = 0;
     
-    if (!dev) {
-        dbg_err("Invalid device pointer\n");
+    if (!reader || !reader->device) {
+        dbg_err("Invalid reader or device pointer\n");
         return -EFAULT;
     }
     
-    // Prevent multiple simultaneous reads
-    if (*offset > 0) {
-        return 0; // EOF
+    // wait for state change if needed (for blocking reads)
+    if (!reader->state_changed) {
+        if (filep->f_flags & O_NONBLOCK) {
+            return -EAGAIN;
+        }
+        if (wait_event_interruptible(reader->wait, reader->state_changed)) {
+            return -ERESTARTSYS;
+        }
     }
     
-    mutex_lock(&dev->state_mutex);
+    reader->state_changed = 0;
+    
+    mutex_lock(&reader->device->state_mutex);
     
     // copy channel states and add newline
-    memcpy(message, dev->channel_states, NUM_CHANNELS);
+    memcpy(message, reader->device->channel_states, NUM_CHANNELS);
     message[NUM_CHANNELS] = '\n';
     
-    mutex_unlock(&dev->state_mutex);
+    mutex_unlock(&reader->device->state_mutex);
     
     errors = copy_to_user(buffer, message, BUFFER_SIZE);
     if (errors != 0) {
-        dbg_dev_info(2, dev->minor, "Failed to send %d characters to user\n", errors);
+        dbg_dev_info(2, reader->device->minor, "Failed to send %d characters to user\n", errors);
         return -EFAULT;
     }
     
-    *offset = BUFFER_SIZE;
-    dbg_dev_info(3, dev->minor, "Read channel states: %.24s\n", message);
+    dbg_dev_info(3, reader->device->minor, "Read channel states: %.24s\n", message);
     return BUFFER_SIZE;
 }
 
 static ssize_t device_write(struct file *filep, const char *buffer, size_t len, loff_t *offset)
 {
-    struct iohubx24_device *dev = (struct iohubx24_device *)filep->private_data;
+    struct iohubx24_reader *writer_reader = filep->private_data;
+    struct iohubx24_device *dev = writer_reader->device;
     char *user_input = NULL;
     int i, valid_digits = 0;
+    int changed = 0;
+    struct iohubx24_reader *reader;
     
     if (!dev) {
         dbg_err("Invalid device pointer\n");
@@ -146,6 +194,9 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
     
     mutex_lock(&dev->state_mutex);
     
+    // save previous states
+    memcpy(dev->prev_channel_states, dev->channel_states, NUM_CHANNELS);
+    
     // initialize all channels to '0'
     memset(dev->channel_states, '0', NUM_CHANNELS);
     
@@ -159,13 +210,49 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
         }
     }
     
+    // Check if state changed
+    for (i = 0; i < NUM_CHANNELS; i++) {
+        if (dev->channel_states[i] != dev->prev_channel_states[i]) {
+            changed = 1;
+            break;
+        }
+    }
+    
     mutex_unlock(&dev->state_mutex);
+    
+    // If state changed, wake up all waiting readers
+    if (changed) {
+        spin_lock(&dev->readers_lock);
+        list_for_each_entry(reader, &dev->readers_list, list) {
+            reader->state_changed = 1;
+            wake_up_interruptible(&reader->wait);
+        }
+        spin_unlock(&dev->readers_lock);
+    }
     
     dbg_dev_info(2, dev->minor, "Updated channel states: %.24s (from %d valid digits)\n", 
                  dev->channel_states, valid_digits);
     
     kfree(user_input);
     return len;
+}
+
+static unsigned int device_poll(struct file *filep, struct poll_table_struct *wait)
+{
+    struct iohubx24_reader *reader = filep->private_data;
+    unsigned int mask = 0;
+
+    if (!reader || !reader->device) {
+        return POLLERR;
+    }
+
+    poll_wait(filep, &reader->wait, wait);
+
+    if (reader->state_changed) {
+        mask |= POLLIN | POLLRDNORM;
+    }
+
+    return mask;
 }
 
 static int __init iohubx24_init(void)
@@ -207,8 +294,11 @@ static int __init iohubx24_init(void)
         devices[i].dev_num = MKDEV(major_number, i);
         devices[i].minor = i;
         mutex_init(&devices[i].state_mutex);
+        INIT_LIST_HEAD(&devices[i].readers_list);
+        spin_lock_init(&devices[i].readers_lock);
         
         memset(devices[i].channel_states, '0', NUM_CHANNELS);
+        memset(devices[i].prev_channel_states, '0', NUM_CHANNELS);
         
         cdev_init(&devices[i].cdev, &fops);
         devices[i].cdev.owner = THIS_MODULE;
@@ -248,12 +338,21 @@ cleanup_devices:
 
 static void __exit iohubx24_exit(void)
 {
+    struct iohubx24_reader *reader, *tmp;
     int i;
     
     dbg_info(1, "Unloading module\n");
     
     if (devices) {
         for (i = 0; i < num_devices; i++) {
+            // Clean up any remaining readers
+            spin_lock(&devices[i].readers_lock);
+            list_for_each_entry_safe(reader, tmp, &devices[i].readers_list, list) {
+                list_del(&reader->list);
+                kfree(reader);
+            }
+            spin_unlock(&devices[i].readers_lock);
+            
             device_destroy(iohubx24_class, devices[i].dev_num);
             cdev_del(&devices[i].cdev);
             mutex_destroy(&devices[i].state_mutex);
