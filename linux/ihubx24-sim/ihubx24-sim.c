@@ -11,6 +11,7 @@
 #include <linux/sched.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/version.h>
 
 #define DEVICE_NAME "ihubx24-sim"
 #define CLASS_NAME "ihubx24"
@@ -138,7 +139,11 @@ static int __init ihubx24_sim_init(void) {
     }
     dbg_info(1, "Registered correctly with major number %d\n", major_number);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
     ihubx24_sim_class = class_create(CLASS_NAME);
+#else
+    ihubx24_sim_class = class_create(THIS_MODULE, CLASS_NAME);
+#endif
     if (IS_ERR(ihubx24_sim_class)) {
         unregister_chrdev(major_number, DEVICE_NAME);
         kfree(devices);
