@@ -41,3 +41,12 @@ The `lcd-sim` module creates character devices that simulate LCD text displays.
 When text is written to these devices, it processes the input text (first 120 characters only), filters out non-printable characters and converts newlines to spaces for LCD display and logs all text updates with timestamps to `/tmp/lcd-output*` files.
 
 lcd-sim is designed for integration and testing.
+
+
+#### video-sim: Video player simulation module.
+
+The `video-sim` module creates a device simulating a video player.
+
+When commands are written to these devices, they control video playback simulation (20-second duration). Commands include SET SRC, LOAD, PLAY, PAUSE, SET CURRENT_TIME, and SET LOOP. Reading from the device returns current playback time every 100ms during playback and "END" when video completes.
+
+video-sim is designed for IoT integration and testing.
