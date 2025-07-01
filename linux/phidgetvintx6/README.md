@@ -26,6 +26,15 @@ watch -n 1 cat /dev/phidgetvintx60
 # 000000  <- All buttons released.
 ```
 
+### DOMIoT Integration
+
+If used with DOMIoT, once the device is connected and the module is loaded, Phidget VINT x6 driver can be used with any i/o bits binding, such as:
+```
+<iot-ibits-button-binding id="buttonsBinding" location="/dev/phidgetvintx60" />
+```
+
+
+
 ## Prerequisites
 
 ### Kernel Headers
