@@ -17,7 +17,7 @@ When hardware input states change, the driver will output the new state:
 
 ```
 # Monitor channel state changes
-watch -n 1 cat /dev/phidgetvintx60
+cat /dev/phidgetvintx60
 
 # Example of buttons states:
 
@@ -62,16 +62,17 @@ Install the Phidget22 library for hardware communication:
 ```bash
 # Ubuntu/Debian
 curl -fsSL https://www.phidgets.com/downloads/setup_linux | sudo -E bash -
-sudo apt install -y libphidget22
+sudo apt install -y libphidget22-dev
 ```
 
-Or download from Phidgets website [https://www.phidgets.com/docs/OS_-_Linux](https://www.phidgets.com/docs/OS_-_Linux)
+Or follow instructions from Phidgets website [https://www.phidgets.com/docs/OS_-_Linux](https://www.phidgets.com/docs/OS_-_Linux)
 
 ## Build and Load
 
 Build module and daemon:
 
 ```
+make clean
 make
 ```
 
@@ -84,13 +85,18 @@ At this stage you should be able to see a device file `/dev/phidgetvintx60`.
 
 Now you can read:
 ```
-watch -n 1 cat /dev/phidgetvintx60
+cat /dev/phidgetvintx60
 ```
 
 and write:
 
 ```
 echo 010000 > /dev/phidgetvintx60
+```
+
+To unload the module use:
+```
+make unload
 ```
 
 ## Architecture
