@@ -233,8 +233,10 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
 {
     struct video_device *dev;
     char *user_input = NULL;
-    char processed_text[VIDEO_MAX_CHARS + 1];
+    static char processed_text[VIDEO_MAX_CHARS + 1]; // Make static to reduce stack frame
     int i, processed_len = 0;
+    size_t actual_len;
+    const char *src_path;
     
     // Handle both reader and direct device access
     if (filep->f_mode & FMODE_READ) {
@@ -254,7 +256,7 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
     }
     
     // Limit to first 1024 characters as requested
-    size_t actual_len = len > VIDEO_MAX_CHARS ? VIDEO_MAX_CHARS : len;
+    actual_len = len > VIDEO_MAX_CHARS ? VIDEO_MAX_CHARS : len;
     
     user_input = kmalloc(actual_len + 1, GFP_KERNEL);
     if (!user_input) {
@@ -396,19 +398,21 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
         dev->video_ended = 0;
         
         // Set the new video source (extract path after "SET SRC=")
-        const char *src_path = processed_text + 8;
-        int src_len = strlen(src_path);
-        if (src_len > 0 && src_len < MAX_PATH_LENGTH) {
-            strncpy(dev->video_src, src_path, MAX_PATH_LENGTH - 1);
-            dev->video_src[MAX_PATH_LENGTH - 1] = '\0';
-            dbg_dev_info(2, dev->minor, "SET SRC command accepted - video source set to: %s (must call LOAD before PLAY) (loop: %s)\n", 
-                         dev->video_src, dev->loop_enabled ? "enabled" : "disabled");
-        } else if (src_len == 0) {
-            memset(dev->video_src, 0, MAX_PATH_LENGTH);
-            dbg_dev_info(2, dev->minor, "SET SRC command accepted - video source cleared (loop: %s)\n", 
-                         dev->loop_enabled ? "enabled" : "disabled");
-        } else {
-            dbg_dev_info(2, dev->minor, "SET SRC command ignored - path too long (%d chars, max %d)\n", src_len, MAX_PATH_LENGTH - 1);
+        src_path = processed_text + 8;
+        {
+            int src_len = strlen(src_path);
+            if (src_len > 0 && src_len < MAX_PATH_LENGTH) {
+                strncpy(dev->video_src, src_path, MAX_PATH_LENGTH - 1);
+                dev->video_src[MAX_PATH_LENGTH - 1] = '\0';
+                dbg_dev_info(2, dev->minor, "SET SRC command accepted - video source set to: %s (must call LOAD before PLAY) (loop: %s)\n", 
+                             dev->video_src, dev->loop_enabled ? "enabled" : "disabled");
+            } else if (src_len == 0) {
+                memset(dev->video_src, 0, MAX_PATH_LENGTH);
+                dbg_dev_info(2, dev->minor, "SET SRC command accepted - video source cleared (loop: %s)\n", 
+                             dev->loop_enabled ? "enabled" : "disabled");
+            } else {
+                dbg_dev_info(2, dev->minor, "SET SRC command ignored - path too long (%d chars, max %d)\n", src_len, MAX_PATH_LENGTH - 1);
+            }
         }
     } else if (strncmp(processed_text, "SET CURRENT_TIME=", 17) == 0) {
         // Extract time value after "SET CURRENT_TIME="
@@ -492,6 +496,10 @@ static ssize_t device_read(struct file *filep, char *buffer, size_t len, loff_t 
     struct video_sim_reader *reader = (struct video_sim_reader *)filep->private_data;
     char time_message[32];
     size_t message_len;
+    const char *end_message;
+    unsigned long position_ms;
+    unsigned long seconds;
+    unsigned long tenths;
     
     if (!reader || !reader->device) {
         dbg_err("Invalid reader or device pointer\n");
@@ -519,7 +527,7 @@ static ssize_t device_read(struct file *filep, char *buffer, size_t len, loff_t 
     if (reader->device->video_ended && !reader->device->loop_enabled) {
         mutex_unlock(&reader->device->state_mutex);
         
-        const char *end_message = "END\n";
+        end_message = "END\r\n";
         message_len = strlen(end_message);
         
         if (len < message_len) {
@@ -530,14 +538,14 @@ static ssize_t device_read(struct file *filep, char *buffer, size_t len, loff_t 
             return -EFAULT;
         }
         
-        dbg_dev_info(2, reader->device->minor, "Read returned: END\n");
+        dbg_dev_info(2, reader->device->minor, "Read returned: END\r\n");
         return message_len;
     }
     
     // Format current time message
-    unsigned long position_ms = reader->device->current_position_ms;
-    unsigned long seconds = position_ms / 1000;
-    unsigned long tenths = (position_ms % 1000) / 100;
+    position_ms = reader->device->current_position_ms;
+    seconds = position_ms / 1000;
+    tenths = (position_ms % 1000) / 100;
     
     snprintf(time_message, sizeof(time_message), "CURRENT_TIME=%lu.%lu\n", seconds, tenths);
     message_len = strlen(time_message);
