@@ -61,11 +61,11 @@ Install the Phidget22 library for hardware communication:
 
 ```bash
 # Ubuntu/Debian
-sudo apt install libphidget22-dev
-
-# Or download from Phidgets website
-# https://www.phidgets.com/docs/OS_-_Linux
+curl -fsSL https://www.phidgets.com/downloads/setup_linux | sudo -E bash -
+sudo apt install -y libphidget22
 ```
+
+Or download from Phidgets website [https://www.phidgets.com/docs/OS_-_Linux](https://www.phidgets.com/docs/OS_-_Linux)
 
 ## Build and Load
 
