@@ -50,3 +50,12 @@ The `video-sim` module creates a device simulating a video player.
 When commands are written to these devices, they control video playback simulation (20-second duration). Commands include SET SRC, LOAD, PLAY, PAUSE, SET CURRENT_TIME, and SET LOOP. Reading from the device returns current playback time every 100ms during playback and "END" when video completes.
 
 video-sim is designed for IoT integration and testing.
+
+
+#### phidgetvintx6: Phidget VINT Hub x6 IO device driver.
+
+Linux module for interfacing with a Phidget VINT Hub x6 IO device using a series of 6 bits (010010).
+
+The driver uses a hybrid kernel/userspace architecture with a kernel module providing `/dev/phidgetvintx6*` device files and a userspace daemon using the Phidget22 library for hardware communication. When hardware input states change, the driver outputs the new state, and it supports both reading and writing 6-bit channel states.
+
+phidgetvintx6 is designed for production use with real Phidget VINT hardware. [What is VINT?](https://www.phidgets.com/docs/What_is_VINT%3F)
